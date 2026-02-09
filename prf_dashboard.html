@@ -528,10 +528,15 @@
     const s2 = computeStats(grid, parseInt(r.k2,10), CL);
     const any = computeAnyPay(grid, parseInt(r.k1,10), parseInt(r.k2,10), CL);
 
-    if (!(s1 && s2 && any)) {
-      out.innerHTML = `<div class="pill red">Rainfall history loaded, but this grid/interval series is missing for some years.</div>`;
-      return;
-    }
+if (!(s1 && s2)) {
+  out.innerHTML = `<div class="pill red">
+    Rainfall history loaded, but one interval series is missing for this grid.
+  </div>`;
+  return;
+}
+
+// overlap may be missing — not fatal
+const overlapN = any ? any.n : 0;
 
     const wEPCF = r.w1*s1.meanPCF + r.w2*s2.meanPCF;
     const wR = (wEPCF - obj) / (1.0 - s);
