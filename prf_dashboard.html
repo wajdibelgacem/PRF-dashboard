@@ -8,15 +8,9 @@
   <style>
     :root{
       --bg:#0b1220;
-      --card:#0f1a2e;
-      --card2:#0c1629;
       --text:#eef2ff;
       --muted:#b6c2ffcc;
       --line:#22304f;
-      --accent:#7c3aed;
-      --accent2:#22c55e;
-      --warn:#fbbf24;
-      --bad:#fb7185;
       --shadow: 0 10px 30px rgba(0,0,0,.25);
       --radius: 18px;
     }
@@ -31,10 +25,7 @@
       line-height:1.45;
     }
     .wrap{max-width:1100px;margin:0 auto;padding:28px 18px 60px}
-    .hero{
-      display:flex;gap:18px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;
-      margin-bottom:18px;
-    }
+    .hero{display:flex;gap:18px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;margin-bottom:18px;}
     .title{font-size:28px;font-weight:800;letter-spacing:.2px;margin:0;}
     .subtitle{margin-top:6px;color:var(--muted);max-width:70ch}
     .chiprow{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
@@ -78,12 +69,11 @@
     }
     button.secondary{background: rgba(255,255,255,.06);font-weight:600;}
     .status{margin-top:7px;font-size:12px;color:var(--muted);}
-    .status.ok{color: rgba(34,197,94,.95)}
-    .status.bad{color: rgba(251,113,133,.95)}
+    .status .ok{color: rgba(34,197,94,.95)}
+    .status .bad{color: rgba(251,113,133,.95)}
     .kpiRow{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
     .kpi{
-      flex:1;
-      min-width:210px;
+      flex:1;min-width:210px;
       background: rgba(0,0,0,.18);
       border:1px solid rgba(255,255,255,.10);
       border-radius:16px;
@@ -120,7 +110,6 @@
       border:1px solid rgba(255,255,255,.12);
       background: rgba(124,58,237,.10);
     }
-    .callout b{color:var(--text)}
     .topbar{
       display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;
       margin: 10px 0 0 0;
@@ -278,9 +267,14 @@
   }
 
   function parseDir(text) {
+    if (!text) throw new Error("Directory file is empty.");
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
     const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
     const t = {};
-    for (const line of lines) {
+    for (const line0 of lines) {
+      const line = line0.trim();
+      if (!line) continue;
       const p = line.split("|");
       if (p.length < 4) continue;
       const st = p[0].trim();
@@ -301,6 +295,9 @@
   }
 
   function parsePrf(text) {
+    if (!text) throw new Error("PRF results file is empty.");
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
     const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
     if (lines.length < 2) throw new Error("PRF file looks empty.");
     const header = lines[0].split("|").map(s => s.trim());
@@ -356,22 +353,39 @@
     return d;
   }
 
+  // ROBUST hosted/local rainfall parsing
   function parseRain(text) {
-    const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
-    if (lines.length < 2) throw new Error("Rainfall file looks empty.");
+    if (!text) throw new Error("Rainfall file is empty.");
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
+    const lines = text.split(/\r?\n/);
     const r = {};
+    let kept = 0;
+
     for (let i=0; i<lines.length; i++) {
-      const p = lines[i].split("|");
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      const low = line.toLowerCase();
+      if (low.startsWith("gridcode|") || line.startsWith("version https://git-lfs")) continue;
+
+      const p = line.split("|");
       if (p.length < 4) continue;
+
       const g = p[0].trim();
       const y = parseInt(p[1].trim(), 10);
       const k = parseInt(p[2].trim(), 10);
       const ri = parseFloat(p[3].trim());
+
       if (!g || !Number.isFinite(y) || !Number.isFinite(k) || !Number.isFinite(ri)) continue;
+
       if (!r[g]) r[g] = {};
       if (!r[g][y]) r[g][y] = {};
       r[g][y][k] = ri;
+      kept++;
     }
+
+    if (kept === 0) throw new Error("Rainfall parsed 0 rows (format/encoding issue).");
     return r;
   }
 
@@ -447,9 +461,9 @@
     if (!g) return null;
     let n=0, any=0, both=0, none=0;
     for (const y in g) {
-      const a = g[y][k1];
-      const b = g[y][k2];
-      if (a == null || b == null) continue;
+      const a = g[y]?.[k1];
+      const b = g[y]?.[k2];
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
       n++;
       const payA = a < CL;
       const payB = b < CL;
@@ -528,15 +542,13 @@
     const s2 = computeStats(grid, parseInt(r.k2,10), CL);
     const any = computeAnyPay(grid, parseInt(r.k1,10), parseInt(r.k2,10), CL);
 
-if (!(s1 && s2)) {
-  out.innerHTML = `<div class="pill red">
-    Rainfall history loaded, but one interval series is missing for this grid.
-  </div>`;
-  return;
-}
+    if (!(s1 && s2)) {
+      out.innerHTML = `<div class="pill red">Rainfall history loaded, but one interval series is missing for this grid.</div>`;
+      return;
+    }
 
-// overlap may be missing — not fatal
-const overlapN = any ? any.n : 0;
+    // overlap may be missing — not fatal
+    const overlapN = any ? any.n : 0;
 
     const wEPCF = r.w1*s1.meanPCF + r.w2*s2.meanPCF;
     const wR = (wEPCF - obj) / (1.0 - s);
@@ -546,7 +558,36 @@ const overlapN = any ? any.n : 0;
     const net_per_acre = indemn_per_acre - prem_producer_per_acre;
 
     const p1 = 100*s1.pPay, p2 = 100*s2.pPay;
-    const pany = 100*any.pAny, pboth = 100*any.pBoth, pnone = 100*any.pNone;
+
+    const anyBlock = (any && any.n > 0) ? `
+      <div class="kpi">
+        <div class="k">Chance of any payout</div>
+        <div class="v">${(100*any.pAny).toFixed(1)}%</div>
+        <div class="s">${any.n} overlapping years</div>
+      </div>
+    ` : `
+      <div class="kpi">
+        <div class="k">Chance of any payout</div>
+        <div class="v">—</div>
+        <div class="s">Not available (no overlapping years)</div>
+      </div>
+    `;
+
+    const noneBlock = (any && any.n > 0) ? `
+      <div class="kpi">
+        <div class="k">No-payout years</div>
+        <div class="v">${(100*any.pNone).toFixed(1)}%</div>
+        <div class="s">Both-interval payout: ${(100*any.pBoth).toFixed(1)}%</div>
+      </div>
+    ` : `
+      <div class="kpi">
+        <div class="k">No-payout years</div>
+        <div class="v">—</div>
+        <div class="s">Overlap years: ${overlapN}</div>
+      </div>
+    `;
+
+    const subsidyPill = `<span class="pill yellow"><b>Subsidy</b>: ${Math.round(100*s)}% (producer share ${Math.round(100*(1-s))}%)</span>`;
 
     out.innerHTML = `
       <div>
@@ -555,22 +596,14 @@ const overlapN = any ? any.n : 0;
 
         <div class="divider"></div>
 
-        <<div class="kpiRow">
+        <div class="kpiRow">
           <div class="kpi">
             <div class="k">Expected net return</div>
             <div class="v">${net_per_acre.toFixed(2)} <span class="small">$/acre</span></div>
             <div class="s">Historical mean: indemnity − producer premium</div>
           </div>
-          <div class="kpi">
-            <div class="k">Chance of any payout</div>
-            <div class="v">${pany.toFixed(1)}%</div>
-            <div class="s">${any.n} historical years in file</div>
-          </div>
-          <div class="kpi">
-            <div class="k">No-payout years</div>
-            <div class="v">${pnone.toFixed(1)}%</div>
-            <div class="s">Both-interval payout: ${pboth.toFixed(1)}%</div>
-          </div>
+          ${anyBlock}
+          ${noneBlock}
         </div>
 
         <div class="divider"></div>
@@ -578,12 +611,11 @@ const overlapN = any ? any.n : 0;
         <div class="pillrow">
           <span class="pill green"><b>${r.m1}</b>: pays in ${p1.toFixed(1)}% of years · average payout factor ${s1.meanPCF.toFixed(3)}</span>
           <span class="pill green"><b>${r.m2}</b>: pays in ${p2.toFixed(1)}% of years · average payout factor ${s2.meanPCF.toFixed(3)}</span>
-          <span class="pill yellow"><b>Subsidy</b>: ${Math.round(100*s)}% (producer share ${Math.round(100*(1-s))}%)</span>
+          ${subsidyPill}
         </div>
 
         <div class="callout">
-          <b>What this means</b>: Based on the historical rainfall index for this grid, this election paid at least once in about
-          <b>${pany.toFixed(1)}%</b> of years. On average, the model implies <b>${net_per_acre.toFixed(2)} $/acre</b> net of the producer premium.
+          <b>What this means</b>: Based on historical rainfall index data for this grid, the model implies <b>${net_per_acre.toFixed(2)} $/acre</b> net of the producer premium on average.
           Your actual outcome can differ because rainfall and program rates vary year to year.
         </div>
 
@@ -603,7 +635,7 @@ const overlapN = any ? any.n : 0;
             <div class="mono">
               ${r.k1}: Pr(RI&lt;CL)=${(100*s1.pPay).toFixed(1)}% · E[PCF]=${s1.meanPCF.toFixed(4)} · mean RI=${s1.meanRI.toFixed(3)} · n=${s1.n}<br/>
               ${r.k2}: Pr(RI&lt;CL)=${(100*s2.pPay).toFixed(1)}% · E[PCF]=${s2.meanPCF.toFixed(4)} · mean RI=${s2.meanRI.toFixed(3)} · n=${s2.n}<br/>
-              Any payout=${(100*any.pAny).toFixed(1)}% · Both=${(100*any.pBoth).toFixed(1)}% · None=${(100*any.pNone).toFixed(1)}% · years=${any.n}
+              Overlap years (k1 & k2) = ${overlapN}
             </div>
           </div>
         </details>
@@ -693,12 +725,22 @@ const overlapN = any ? any.n : 0;
         fetch("rainfall_long_only_clean.txt", {cache:"no-store"}).then(r => { if(!r.ok) throw new Error("Missing rainfall_long_only_clean.txt"); return r.text(); })
       ]);
 
-      tree = parseDir(dirText); readyDir = true; $("statusDir").innerHTML = `<span class="ok">Loaded directory.</span>`;
+      tree = parseDir(dirText);   readyDir = true; $("statusDir").innerHTML = `<span class="ok">Loaded directory.</span>`;
       detail = parsePrf(prfText); readyPrf = true; $("statusPrf").innerHTML = `<span class="ok">Loaded PRF results.</span>`;
       rain = parseRain(rainText); readyRain = true; $("statusRain").innerHTML = `<span class="ok">Loaded rainfall history.</span>`;
 
+      // Helpful debug (can leave it in)
+      console.log("Rain parsed grids:", Object.keys(rain).length);
+
       fillStates();
       out.innerHTML = `<div class="card"><span class="ok">Ready.</span> Pick State → County → Grid.</div>`;
+
+      // OPTIONAL: hide upload inputs once auto-load succeeds
+      // document.querySelectorAll('input[type="file"]').forEach(el => el.style.display = "none");
+      // document.querySelectorAll('.label').forEach(el => {
+      //   if (el.textContent.includes("Directory") || el.textContent.includes("PRF optimal") || el.textContent.includes("Rainfall")) el.style.display = "none";
+      // });
+
     } catch (err) {
       setModeLabel("manual upload (auto failed)");
       $("statusDir").innerHTML = `<span class="bad">Auto-load failed.</span>`;
